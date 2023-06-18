@@ -1,0 +1,69 @@
+body {
+    font-family: 'Roboto', Arial, sans-serif;
+    background-color: #202020;
+    color: #fff;
+    line-height: 1.5;
+}
+
+a {
+    color : #1976d2
+}
+
+#scanButton, #sortButton {
+    margin: 20px auto;
+    padding: 10px;
+    background-color: #1976d2; /* couleur bleue Material Design */
+    color: #fff;
+    border: none;
+    border-radius: 5px; /* arrondissement des coins */
+    box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); /* ombre portée */
+    display: block;
+    transition: background-color 0.1s ease; /* transition pour l'effet de changement de couleur */
+}
+
+h1 {
+    margin: 0px 20px;
+    padding: 0px 10px;
+    padding-top : 10px;
+    color: #fff;
+    border: none; 
+    text-align: center;
+}
+
+#footer {
+    font-size: smaller;
+    text-align: center;
+}
+
+#scanButton:hover, #sortButton:hover {
+    background-color: #1565c0; /* couleur bleue plus foncée au survol */
+}
+
+.card {
+    border: 1px solid #404040;
+    margin: 20px auto;
+    padding: 10px;
+    background-color: #303030;
+    max-width: 500px;
+}
+
+.card img {
+    width: 100%;
+}
+
+.card h2 {
+    margin: 0;
+    padding: 0;
+}
+
+.card p {
+    margin-top: 10px;
+}
+
+.card a {
+    color: #89cff0;
+}
+
+.card a:hover {
+    color: #46b1d1;
+}
