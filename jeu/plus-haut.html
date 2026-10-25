@@ -224,19 +224,20 @@ function rr(x, y, w, h, r) {
 const SKY = [[0, '#8fd0ef', '#e4f4fb'], [350, '#7b7fd0', '#ffc09a'], [900, '#1f2560', '#5a4795'], [1800, '#070a22', '#1d2358']];
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const SKYRGB = SKY.map(([m, a, b]) => [m, hex(a), hex(b)]);
-function skyAt(m) {
-  let i = 0; while (i < SKYRGB.length - 2 && m > SKYRGB[i + 1][0]) i++;
-  const [m0, a0, b0] = SKYRGB[i], [m1, a1, b1] = SKYRGB[i + 1], t = clamp((m - m0) / (m1 - m0), 0, 1);
+function skyAt(m, stops = SKYRGB) {
+  let i = 0; while (i < stops.length - 2 && m > stops[i + 1][0]) i++;
+  const [m0, a0, b0] = stops[i], [m1, a1, b1] = stops[i + 1], t = clamp((m - m0) / (m1 - m0), 0, 1);
   const mix = (p, q) => `rgb(${p.map((v, j) => Math.round(lerp(v, q[j], t))).join(',')})`;
   return [mix(a0, a1), mix(b0, b1)];
 }
 const STARS = Array.from({ length: 70 }, () => [Math.random(), Math.random(), rnd(0.6, 1.8)]);
-function night(g) { return clamp((alt(g, g.camY + H / 2) - 450) / 600, 0, 1); }
+function night(g) { const r = (MODES[S.mode] && MODES[S.mode].nightRange) || [450, 600]; return clamp((alt(g, g.camY + H / 2) - r[0]) / r[1], 0, 1); }
 function hudCol(g) { return night(g) > 0.45 ? C.paper : C.ink; }
 
 function drawSky(g) {
   const mid = alt(g, g.camY + H / 2);
-  const [top, bot] = skyAt(mid + 20);
+  const md = MODES[S.mode];
+  const [top, bot] = md.skyStops ? skyAt(mid, md.skyStops) : skyAt(mid + 20);
   const gr = ctx.createLinearGradient(0, 0, 0, H);
   gr.addColorStop(0, top); gr.addColorStop(1, bot);
   ctx.fillStyle = gr; ctx.fillRect(-30, -30, W + 60, H + 60);
@@ -249,7 +250,8 @@ function drawSky(g) {
     }
     ctx.globalAlpha = 1;
   }
-  // graduations tous les 50 m
+  if (md.decor) drawDecor(g);
+  // graduations
   const col = hudCol(g);
   ctx.strokeStyle = col; ctx.fillStyle = col; ctx.font = `600 10px ${FB}`; ctx.textAlign = 'right';
   const T = g.tick || 50, m0 = Math.floor(alt(g, g.camY + H) / T) * T;
@@ -929,6 +931,116 @@ const flipper = {
 };
 
 
+// ---------- décor du Flipper épuré : paliers, ciel, silhouettes ----------
+const TIERS = [[0, 'La rue'], [15, 'Les toits de Paris'], [45, 'Le grand ciel'], [90, 'Les nuages'], [150, 'Le coucher de soleil'], [250, 'La haute atmosphère'], [400, 'L\'espace']];
+const PURE_SKY = [[0, '#8fd0ef', '#e4f4fb'], [45, '#86cbf0', '#dff2fb'], [90, '#9ccfee', '#eef6fb'], [150, '#7b7fd0', '#ffc09a'], [250, '#1f2560', '#5a4795'], [400, '#070a22', '#1d2358']]
+  .map(([m, a, b]) => [m, hex(a), hex(b)]);
+function srand(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const camBottomM = g => alt(g, g.camY + H);
+const yAt = (g, m, p = 1) => H - (m - camBottomM(g)) * g.M * p;
+const tierIndex = m => { let k = 0; for (let i = 0; i < TIERS.length; i++) if (m >= TIERS[i][0]) k = i; return k; };
+
+// Silhouettes des repères : base au sol (0 m), sommet à leur hauteur réelle
+const LANDS = [
+  { m: 6, side: 1, asp: 1.3, k: 'maison' }, { m: 20, side: -1, asp: 0.9, k: 'haussmann' }, { m: 35, side: 1, asp: 0.8, k: 'chene' },
+  { m: 50, side: -1, asp: 0.9, k: 'arc' }, { m: 56, side: 1, asp: 0.28, k: 'pise' }, { m: 69, side: -1, asp: 0.6, k: 'nd' },
+  { m: 93, side: 1, asp: 0.3, k: 'liberte' }, { m: 139, side: -1, asp: 1.6, k: 'kheops' }, { m: 210, side: 1, asp: 0.3, k: 'montparnasse' },
+  { m: 330, side: -1, asp: 0.38, k: 'eiffel' }, { m: 443, side: 1, asp: 0.2, k: 'empire' }, { m: 828, side: -1, asp: 0.12, k: 'burj' }
+];
+function landPath(k, cx, yb, yt, w) {
+  const h = yb - yt, L = cx - w / 2, R = cx + w / 2;
+  ctx.beginPath();
+  if (k === 'maison') { ctx.rect(L, yt + h * .4, w, h * .6); ctx.moveTo(L - w * .06, yt + h * .42); ctx.lineTo(cx, yt); ctx.lineTo(R + w * .06, yt + h * .42); ctx.closePath(); }
+  else if (k === 'haussmann') { ctx.rect(L, yt + h * .16, w, h * .84); ctx.moveTo(L, yt + h * .17); ctx.lineTo(L + w * .08, yt); ctx.lineTo(R - w * .08, yt); ctx.lineTo(R, yt + h * .17); ctx.closePath(); }
+  else if (k === 'chene') { ctx.rect(cx - w * .07, yt + h * .45, w * .14, h * .55); for (const [dx, dy, r] of [[0, .28, .34], [-.25, .38, .26], [.25, .38, .26], [-.12, .12, .22], [.14, .14, .2]]) { ctx.moveTo(cx + dx * w + r * w, yt + dy * h); ctx.arc(cx + dx * w, yt + dy * h, r * w, 0, 7); } }
+  else if (k === 'arc') { ctx.moveTo(L, yb); ctx.lineTo(L, yt); ctx.lineTo(R, yt); ctx.lineTo(R, yb); ctx.lineTo(cx + w * .2, yb); ctx.lineTo(cx + w * .2, yt + h * .55); ctx.arc(cx, yt + h * .55, w * .2, 0, Math.PI, true); ctx.lineTo(cx - w * .2, yb); ctx.closePath(); }
+  else if (k === 'pise') { const lean = h * .08; ctx.moveTo(L, yb); ctx.lineTo(L + lean, yt + h * .04); ctx.lineTo(R + lean, yt); ctx.lineTo(R, yb); ctx.closePath(); }
+  else if (k === 'nd') { ctx.rect(L, yt + h * .45, w, h * .55); ctx.rect(L, yt, w * .36, h); ctx.rect(R - w * .36, yt, w * .36, h); }
+  else if (k === 'liberte') { ctx.moveTo(L, yb); ctx.lineTo(L + w * .15, yt + h * .5); ctx.lineTo(R - w * .15, yt + h * .5); ctx.lineTo(R, yb); ctx.closePath(); ctx.rect(cx - w * .12, yt + h * .12, w * .24, h * .4); ctx.rect(cx + w * .06, yt, w * .07, h * .16); }
+  else if (k === 'kheops') { ctx.moveTo(L, yb); ctx.lineTo(cx, yt); ctx.lineTo(R, yb); ctx.closePath(); }
+  else if (k === 'montparnasse') { ctx.rect(L, yt, w, h); }
+  else if (k === 'eiffel') { ctx.moveTo(L, yb); ctx.quadraticCurveTo(cx - w * .1, yt + h * .45, cx - w * .03, yt + h * .05); ctx.lineTo(cx, yt); ctx.lineTo(cx + w * .03, yt + h * .05); ctx.quadraticCurveTo(cx + w * .1, yt + h * .45, R, yb); ctx.lineTo(cx + w * .2, yb); ctx.arc(cx, yb, w * .2, 0, Math.PI, true); ctx.closePath(); }
+  else if (k === 'empire') { ctx.rect(L, yt + h * .3, w, h * .7); ctx.rect(L + w * .2, yt + h * .15, w * .6, h * .2); ctx.rect(cx - w * .08, yt, w * .16, h * .2); }
+  else if (k === 'burj') { for (let s = 0; s < 6; s++) { const f = s / 6, ww = w * (1 - f * .85); ctx.rect(cx - ww / 2, yt + h * (1 - (s + 1) / 6) , ww, h / 6 + 1); } ctx.rect(cx - 1.5, yt - h * .05, 3, h * .1); }
+}
+let SKYLINE = null;
+function skyline() {
+  if (SKYLINE && SKYLINE.w === W) return SKYLINE;
+  const r = srand(7), far = [], near = [];
+  for (let x = -20; x < W + 20;) { const w = 28 + r() * 40; far.push({ x, w, h: 9 + r() * 14, chim: r() < .5 }); x += w + 2; }
+  for (let x = -10; x < W + 20;) { const w = 40 + r() * 50; near.push({ x, w, h: 6 + r() * 10, chim: r() < .6 }); x += w + 18 + r() * 40; }
+  const clouds = []; for (let i = 0; i < 44; i++) clouds.push({ m: 70 + r() * 230, x: r() * W, s: 18 + r() * 34, p: .75 + r() * .2 });
+  const planets = [{ m: 430, x: W * .78, r: 26, ring: true }, { m: 560, x: W * .2, r: 16, ring: false }, { m: 700, x: W * .65, r: 40, ring: true }];
+  return SKYLINE = { w: W, far, near, clouds, planets };
+}
+function drawDecor(g) {
+  const nt = night(g), ink = nt > .45 ? C.paper : C.ink, sk = skyline();
+  // nuages
+  ctx.fillStyle = C.paper;
+  for (const c of sk.clouds) {
+    const y = yAt(g, c.m, c.p); if (y < -60 || y > H + 60) continue;
+    ctx.globalAlpha = .55 * (1 - nt * .6);
+    ctx.beginPath(); ctx.arc(c.x, y, c.s, 0, 7); ctx.arc(c.x + c.s * .9, y + c.s * .2, c.s * .75, 0, 7); ctx.arc(c.x - c.s * .9, y + c.s * .25, c.s * .65, 0, 7); ctx.fill();
+  }
+  // planètes
+  for (const p of sk.planets) {
+    const y = yAt(g, p.m, .6); if (y < -80 || y > H + 80) continue;
+    ctx.globalAlpha = .9; ctx.fillStyle = C.coral; ctx.beginPath(); ctx.arc(p.x, y, p.r, 0, 7); ctx.fill();
+    if (p.ring) { ctx.strokeStyle = C.sun; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(p.x, y, p.r * 1.8, p.r * .45, -.35, 0, 7); ctx.stroke(); }
+  }
+  // repères dessinés : visibles quand on approche de leur sommet
+  ctx.fillStyle = ink;
+  for (const l of LANDS) {
+    const top = yAt(g, l.m), fade = clamp(Math.min((H * 1.9 - top) / (H * .5), (top + H * .4) / (H * .4)), 0, 1); if (!fade) continue;
+    // silhouette à l'échelle de l'écran, sommet aligné sur la vraie altitude
+    const yt = yAt(g, l.m), hh = H * .85, yb = yt + hh, w = Math.min(hh * l.asp, W * .42);
+    const cx = l.side < 0 ? w * .5 - w * .12 : W - w * .5 + w * .12;
+    ctx.globalAlpha = .17 * fade; landPath(l.k, cx, yb, yt, w); ctx.fill('evenodd');
+  }
+  // la ville au sol, deux plans
+  for (const [layer, p, a] of [[sk.far, .5, .12], [sk.near, .8, .2]]) {
+    const base = yAt(g, -1, p); if (base - 30 * g.M * p > H) continue;
+    ctx.globalAlpha = a; ctx.fillStyle = ink;
+    for (const b of layer) {
+      const top = base - b.h * g.M * p;
+      ctx.fillRect(b.x, top, b.w, base - top + H);
+      if (b.chim) ctx.fillRect(b.x + b.w * .7, top - 1.5 * g.M * p, b.w * .1, 1.5 * g.M * p);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawTierHud(g, col) {
+  // jauge de progression : chaque palier occupe la même longueur
+  const x = 6, y0 = H - 30, y1 = 86, n = TIERS.length - 1;
+  const frac = m => { const k = tierIndex(m); if (k >= n) return 1; const [a] = TIERS[k], [b] = TIERS[k + 1]; return (k + clamp((m - a) / (b - a), 0, 1)) / n; };
+  ctx.globalAlpha = .35; ctx.fillStyle = col; ctx.fillRect(x - 1, y1, 2, y0 - y1);
+  for (let k = 0; k <= n; k++) { const y = lerp(y0, y1, k / n); ctx.fillRect(x - 3, y - 1, 6, 2); }
+  ctx.globalAlpha = 1;
+  const b = best(S.mode);
+  if (b) { const y = lerp(y0, y1, frac(b)); ctx.fillStyle = C.sun; ctx.fillRect(x - 4, y - 1.5, 8, 3); }
+  const y = lerp(y0, y1, frac(g.alt));
+  ctx.fillStyle = C.sun; ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.fill(); ctx.stroke();
+  // nom du palier sous le score
+  ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.font = `800 10px ${FB}`; ctx.globalAlpha = .8;
+  ctx.fillText(TIERS[tierIndex(g.alt)][1].toUpperCase(), W / 2, best(S.mode) ? 76 : 62); ctx.globalAlpha = 1;
+  // bannière à l'entrée d'un palier
+  if (g.banner) {
+    const t = (performance.now() - g.banner.t) / 1000;
+    if (t > 2.2) g.banner = null;
+    else {
+      const a = clamp(Math.min(t * 5, (2.2 - t) * 3), 0, 1), dy = (1 - Math.min(1, t * 4)) * -20;
+      ctx.globalAlpha = a; ctx.textAlign = 'center';
+      ctx.font = `800 11px ${FB}`; const sub = `PALIER ${g.banner.k + 1} SUR ${TIERS.length}`;
+      ctx.font = `24px ${FD}`; const tw = Math.min(W - 40, ctx.measureText(g.banner.text).width + 32);
+      ctx.fillStyle = C.paper; ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+      rr(W / 2 - tw / 2, H * .2 + dy, tw, 62, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.ink; ctx.fillText(g.banner.text, W / 2, H * .2 + dy + 44, W - 56);
+      ctx.font = `800 10px ${FB}`; ctx.fillStyle = C.coral; ctx.fillText(sub, W / 2, H * .2 + dy + 18);
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
 // =====================================================================
 // FLIPPER (épuré) : un geste, un score en mètres, on perd au premier étage raté
 // =====================================================================
@@ -1023,10 +1135,21 @@ const flipperPur = Object.assign(Object.create(flipper), {
     for (const st of g.stages) if (st.type === 'moving') this.layoutStage(st, st.base + st.amp * Math.sin(g.t * st.sp + st.ph));
   },
   deathLine(g) { return `Étage ${g.maxStage}. ${landmark(Math.floor(g.alt))} ${pick(FUNNY)}`; },
+  decor: true, skyStops: PURE_SKY, nightRange: [200, 150],
+  update(g, dt) {
+    flipper.update.call(this, g, dt);
+    const k = tierIndex(g.alt);
+    if (k > (g.tier || 0)) {
+      g.tier = k; g.banner = { text: TIERS[k][1], k, t: performance.now() };
+      [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => sfx(f, 0.18, 'triangle', 0.05), i * 70));
+      burst(W / 2, g.camY + H * 0.25, C.sun, 24, H * 0.6); S.shake = Math.max(S.shake, 0.3);
+    }
+  },
   hud(g, col) {
     ctx.fillStyle = col; ctx.textAlign = 'left';
-    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('ÉTAGE', 14, 30); ctx.globalAlpha = 1;
-    ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 14, 50);
+    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('ÉTAGE', 18, 30); ctx.globalAlpha = 1;
+    ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 18, 50);
+    drawTierHud(g, col);
   }
 });
 const pick = a => a[Math.floor(Math.random() * a.length)];

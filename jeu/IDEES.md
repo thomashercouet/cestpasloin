@@ -10,8 +10,11 @@ Les éléments arrivent un par un en montant ; la difficulté est indexée sur l
 Types d'étages (tirés au sort, introduits progressivement) : classique, décalé, asymétrique (dès l'étage 3),
 plot au-dessus du trou (4), mobile (6), court (9). Bumpers dès l'étage 1, tremplins dès l'étage 8.
 
-Plan : 1. cœur sec (fait) · 2. paliers visuels par altitude (ville, nuages, espace) et repères dessinés ·
-3. oiseau et bulle introduits progressivement.
+Plan : 1. cœur sec (fait) · 2. paliers visuels (fait) · 3. oiseau et bulle introduits progressivement.
+
+Paliers : la rue (0 m), les toits de Paris (15), le grand ciel (45), les nuages (90), le coucher de soleil (150),
+la haute atmosphère (250), l'espace (400). Bannière à chaque palier, jauge à gauche, repères dessinés en silhouette
+(sommet aligné sur leur vraie altitude), ville au sol en deux plans, nuages, planètes.
 
 Ce qui existe :
 - Étages de flippers empilés, un seul geste (maintenir = flippers levés).
