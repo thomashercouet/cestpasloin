@@ -2,7 +2,13 @@
 
 ## Plus Haut : Flipper (à retravailler, coup de cœur)
 
-Prototype jouable : onglet **Flipper** de `jeu/plus-haut.html`.
+Prototype jouable : onglet **Flipper** (version épurée) et **Flipper+** (version chargée) de `jeu/plus-haut.html`.
+
+Direction retenue (inspirée de Flappy Bird) : un seul geste, un score en mètres, on perd au premier étage raté,
+relance instantanée, ligne « TON RECORD » dans le décor. Les éléments arrivent un par un en montant.
+
+Plan : 1. cœur sec (fait) · 2. paliers visuels par altitude (ville, nuages, espace) et repères dessinés ·
+3. oiseau et bulle introduits progressivement.
 
 Ce qui existe :
 - Étages de flippers empilés, un seul geste (maintenir = flippers levés).

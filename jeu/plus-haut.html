@@ -44,7 +44,9 @@ body {
   border-bottom: 2px solid var(--ink);
 }
 .brand { font-family: var(--f-display); font-size: 15px; letter-spacing: .02em; white-space: nowrap; }
-.modes { display: flex; gap: 4px; flex: 1; justify-content: center; min-width: 0; }
+.modes { display: flex; gap: 4px; flex: 1; justify-content: center; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.modes::-webkit-scrollbar { display: none; }
+.modes button { flex: none; }
 .modes button, .mute {
   font: 600 14px var(--f-body);
   padding: 7px 9px;
@@ -103,6 +105,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     <div class="brand">PLUS HAUT</div>
     <nav class="modes" role="tablist" aria-label="Prototypes">
       <button id="tab-flipper" role="tab" data-mode="flipper" aria-selected="true">Flipper</button>
+      <button id="tab-flipperplus" role="tab" data-mode="flipperplus" aria-selected="false">Flipper+</button>
       <button id="tab-fronde" role="tab" data-mode="fronde" aria-selected="false">Fronde</button>
       <button id="tab-rebond" role="tab" data-mode="rebond" aria-selected="false">Rebond</button>
       <button id="tab-zigzag" role="tab" data-mode="zigzag" aria-selected="false">Zigzag</button>
@@ -113,7 +116,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     <canvas id="c" aria-label="Zone de jeu"></canvas>
     <div class="overlay" id="ov">
       <div class="card">
-        <span class="eyebrow" id="ovEyebrow">Prototype 1 sur 4</span>
+        <span class="eyebrow" id="ovEyebrow">Prototype 1 sur 5</span>
         <h2 id="ovTitle">Fronde</h2>
         <p id="ovRule"></p>
         <span class="best" id="ovBest"></span>
@@ -265,6 +268,17 @@ function drawSky(g) {
     ctx.globalAlpha = 0.75; ctx.fillText(`${label.toUpperCase()} · ${m} m`, 12, y - 6);
   }
   ctx.globalAlpha = 1;
+  if (unitOf(S.mode) === 'm') {
+    const b = best(S.mode), y = g.startY - b * g.M - g.camY;
+    if (b > 0 && y > -10 && y < H + 10) {
+      ctx.fillStyle = C.sun; ctx.fillRect(0, y - 1.5, W, 3);
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.strokeRect(0, y - 1.5, W, 3);
+      ctx.font = `12px ${FD}`; ctx.textAlign = 'right'; ctx.fillStyle = C.ink;
+      const t = `TON RECORD · ${b} m`, tw = ctx.measureText(t).width;
+      ctx.fillStyle = C.sun; rr(W - tw - 22, y - 22, tw + 12, 18, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.ink; ctx.fillText(t, W - 16, y - 8.5);
+    }
+  }
 }
 
 function drawFloor(g, k) {
@@ -338,7 +352,7 @@ function drawParts(g) {
 // 1. FRONDE : tir à la fronde, chaque brique cassée recharge un tir
 // =====================================================================
 const fronde = {
-  title: 'Fronde', n: 2,
+  title: 'Fronde', n: 3,
   rule: 'Glissez vers le bas puis relâchez pour lancer la bille. Le temps ralentit pendant la visée. Chaque brique cassée recharge un tir.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, bricks: [], charges: 1, maxCharges: 2, aim: null, ts: 1, alt: 0, trail: [], noCharge: 0 };
@@ -487,7 +501,7 @@ const fronde = {
 // 2. REBOND : la bille rebondit seule, le doigt la déplace à l'horizontale
 // =====================================================================
 const rebond = {
-  title: 'Rebond', n: 3,
+  title: 'Rebond', n: 4,
   rule: 'La bille rebondit toute seule. Faites glisser le doigt à gauche ou à droite pour la guider. Chaque brique s\'use à chaque rebond.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, bricks: [], alt: 0, trail: [], drag: null };
@@ -572,7 +586,7 @@ const rebond = {
 // 3. ZIGZAG : la bille monte seule, chaque tap inverse sa direction
 // =====================================================================
 const zigzag = {
-  title: 'Zigzag', n: 4,
+  title: 'Zigzag', n: 5,
   rule: 'La bille monte toute seule et rebondit sur les murs. Touchez l\'écran pour inverser sa direction et passer dans les trous.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, rows: [], alt: 0, trail: [], dir: 1, t: 0 };
@@ -656,7 +670,7 @@ function flipEnds(f) {
 }
 
 const flipper = {
-  title: 'Flipper', n: 1, unit: 'pts', bestKey: 'flipper-pts',
+  title: 'Flipper+', n: 2, unit: 'pts', bestKey: 'flipper-pts',
   rule: 'Gardez le doigt appuyé pour lever les flippers. Abattez les 3 cibles violettes pour monter le multiplicateur. Les tremplins jaunes font sauter 3 étages.',
   init() {
     const g = { camY: 0, M: H / 50, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, score: 0, mult: 1, saver: 5,
@@ -760,7 +774,7 @@ const flipper = {
           const vn = (b.vx - ux) * c.nx + (b.vy - uy) * c.ny;
           if (vn < 0) {
             b.vx -= 1.3 * vn * c.nx; b.vy -= 1.3 * vn * c.ny;
-            if (-vn > H * 1.2 && om) { sfx(330, 0.08, 'triangle', 0.05, 1.8); S.shake = Math.max(S.shake, 0.15); }
+            if (-vn > H * 1.2 && om) { sfx(330, 0.08, 'triangle', 0.05, 1.8); S.shake = Math.max(S.shake, 0.15); if (-vn > H * 2) S.freeze = 0.03; }
           }
         }
       }
@@ -807,7 +821,7 @@ const flipper = {
     for (const t of g.targets) t.flash = Math.max(0, t.flash - dt);
     g.saver = Math.max(0, g.saver - dt);
     for (const s of g.stages) if (s.i > g.maxStage && b.y + b.r < s.y - 10) {
-      g.maxStage = s.i; float(W / 2, s.y - 30, `ÉTAGE ${s.i}`); sfx(1040, 0.12, 'triangle', 0.04, 1.5);
+      g.maxStage = s.i; float(W / 2, s.y - 30, `ÉTAGE ${s.i}`); sfx(523 * Math.pow(2, (s.i % 12) / 12), 0.14, 'triangle', 0.05, 1.5);
     }
     // tombée sous l'étage atteint : le multiplicateur est perdu
     const top = g.stages.find(s => s.i === g.maxStage);
@@ -816,7 +830,9 @@ const flipper = {
     const tgt = b.y - H * 0.4;
     if (tgt < g.camY) g.camY += (tgt - g.camY) * Math.min(1, dt * 5);
     const a = alt(g, b.y + b.r);
-    if (a > g.alt) { g.score += (a - g.alt) * g.mult; g.alt = a; }
+    if (a > g.alt) { if (g.score !== undefined) g.score += (a - g.alt) * g.mult; g.alt = a; }
+    // version épurée : rater l'étage atteint, c'est perdu
+    if (this.pure && top && !g.boost && b.y - b.r > top.y + 30) { die(); return; }
     pushTrail(g);
     this.gen(g);
     if (b.y - b.r > g.camY + H + 5) {
@@ -913,7 +929,62 @@ const flipper = {
   up(g) { g.hold = false; }
 };
 
-const MODES = { flipper, fronde, rebond, zigzag };
+
+// =====================================================================
+// FLIPPER (épuré) : un geste, un score en mètres, on perd au premier étage raté
+// =====================================================================
+const FUNNY = ['La gravité gagne toujours.', 'La bille a le vertige.', 'Newton vous salue.', 'Si près du ciel…', 'Le sol vous remercie de votre visite.'];
+const flipperPur = Object.assign(Object.create(flipper), {
+  title: 'Flipper', n: 1, unit: 'm', bestKey: 'flipper-pur', pure: true,
+  rule: 'Gardez le doigt appuyé pour lever les flippers. Montez d\'étage en étage. Ratez un étage et c\'est fini.',
+  init() {
+    const g = { camY: 0, M: H / 50, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, mult: 1, saver: 0,
+      boost: 0, trail: [], hold: false, maxStage: 0, idx: 0, sinceRamp: 0, sinceSaver: 0, rampEvery: 6 };
+    g.grav = H * 1.9; g.vmax = Math.sqrt(2 * g.grav * H * 1.25);
+    g.top = H * 0.8; g.startY = g.top;
+    g.ball = { x: W * 0.22, y: g.top - H * 0.1, vx: W * 0.1, vy: 0, r: 9 };
+    this.gen(g);
+    return g;
+  },
+  gen(g) {
+    while (g.top > g.camY - H * 0.7) {
+      const i = this.makeStage(g, g.top);
+      const a = alt(g, g.top), D = H * (0.5 + Math.min(0.15, a / 3000)), base = g.top;
+      g.sinceRamp++;
+      const occ = [];
+      const place = (r, y0 = 0.35, y1 = 0.8, x0 = 0.14, x1 = 0.86) => {
+        for (let t = 0; t < 14; t++) {
+          const x = rnd(W * x0, W * x1), y = base - D * rnd(y0, y1);
+          if (occ.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + 30)) { occ.push({ x, y, r }); return { x, y }; }
+        }
+        return null;
+      };
+      // les premiers étages n'ont que des flippers ; les éléments arrivent un par un en montant
+      if (i >= 6 && g.sinceRamp >= g.rampEvery) {
+        const p = place(24, 0.45, 0.75, 0.22, 0.78);
+        if (p) { g.ramps.push({ x: p.x, y: p.y, r: 17, used: false }); g.sinceRamp = 0; g.rampEvery = 6 + Math.floor(Math.random() * 4); }
+      }
+      if (i >= 2) {
+        const nb = (Math.random() < 0.7 ? 1 : 0) + (i >= 8 && Math.random() < 0.5 ? 1 : 0);
+        for (let k = 0; k < nb; k++) { const r = rnd(13, 18), p = place(r); if (p) g.bumpers.push({ x: p.x, y: p.y, r, lit: 0 }); }
+      }
+      g.top -= D;
+    }
+    const lim = g.camY + H + 60;
+    g.stages = g.stages.filter(s => s.y < lim + 20);
+    g.bumpers = g.bumpers.filter(p => p.y < lim);
+    g.ramps = g.ramps.filter(r => r.y < lim);
+  },
+  deathLine(g) { return `Étage ${g.maxStage}. ${landmark(Math.floor(g.alt))} ${pick(FUNNY)}`; },
+  hud(g, col) {
+    ctx.fillStyle = col; ctx.textAlign = 'left';
+    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('ÉTAGE', 14, 30); ctx.globalAlpha = 1;
+    ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 14, 50);
+  }
+});
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+const MODES = { flipper: flipperPur, flipperplus: flipper, fronde, rebond, zigzag };
 
 // ---------- cycle de partie ----------
 function die() {
@@ -926,7 +997,7 @@ function die() {
   g.newBest = sc > b && sc > 0;
   g.prevBest = b;
   if (g.newBest) setBest(S.mode, sc);
-  setTimeout(() => { if (S.phase === 'dead') showOverlay(); }, 550);
+  setTimeout(() => { if (S.phase === 'dead') showOverlay(); }, 380);
 }
 function showOverlay() {
   const m = MODES[S.mode], g = S.g;
@@ -940,7 +1011,7 @@ function showOverlay() {
     else bestEl.textContent = `Record : ${fmt(g.prevBest)} ${unitOf(S.mode)}`;
     $('#ovCta').textContent = 'Touchez pour rejouer';
   } else {
-    $('#ovEyebrow').textContent = `Prototype ${m.n} sur 4`;
+    $('#ovEyebrow').textContent = `Prototype ${m.n} sur 5`;
     $('#ovTitle').textContent = m.title;
     $('#ovRule').textContent = m.rule;
     const b = best(S.mode);
@@ -974,7 +1045,7 @@ function local(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.
 let activePointer = null;
 ov.addEventListener('pointerdown', e => {
   e.preventDefault(); ensureAudio();
-  if (S.phase === 'dead' && performance.now() - S.deadAt < 700) return;
+  if (S.phase === 'dead' && performance.now() - S.deadAt < 450) return;
   startRun();
 });
 cv.addEventListener('pointerdown', e => {
@@ -999,7 +1070,7 @@ window.addEventListener('keydown', e => {
   S.keys[e.key] = true;
   if (e.key === ' ' && !e.repeat) {
     e.preventDefault(); ensureAudio();
-    if (S.phase !== 'play') { if (S.phase === 'menu' || performance.now() - S.deadAt > 700) startRun(); }
+    if (S.phase !== 'play') { if (S.phase === 'menu' || performance.now() - S.deadAt > 450) startRun(); }
     else if (S.mode === 'zigzag') zigzag.down(S.g);
     else if (S.mode === 'flipper') flipper.down(S.g);
   }
@@ -1022,6 +1093,10 @@ function frame(t) {
   const now = t / 1000, dt = S.last ? Math.min(1 / 30, now - S.last) : 1 / 60;
   S.last = now;
   if (S.phase === 'play') { if (S.freeze > 0) S.freeze -= dt; else MODES[S.mode].update(S.g, dt); }
+  if (S.phase === 'play' && unitOf(S.mode) === 'm' && !S.g.beat) {
+    const b = best(S.mode);
+    if (b > 0 && S.g.alt > b) { S.g.beat = true; float(W / 2, S.g.ball.y - 40, 'NOUVEAU RECORD !'); burst(S.g.ball.x, S.g.ball.y, C.sun, 20, H * 0.7); S.shake = Math.max(S.shake, 0.35); sfx(784, 0.12, 'square', 0.05); setTimeout(() => sfx(1175, 0.25, 'square', 0.05), 110); }
+  }
   updFx(dt);
   S.shake = Math.max(0, S.shake - dt * 2.2);
   const g = S.g;
