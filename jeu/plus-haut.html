@@ -154,8 +154,12 @@ const MARKS = [[56, 'Tour de Pise'], [93, 'Statue de la Liberté'], [139, 'Pyram
 // ---------- état partagé ----------
 const S = { mode: 'fronde', phase: 'menu', g: null, parts: [], floats: [], shake: 0, freeze: 0, deadAt: 0, muted: false, last: 0, keys: {} };
 const alt = (g, y) => Math.max(0, (g.startY - y) / g.M);
-function best(m) { try { return +localStorage.getItem('plushaut.best.' + m) || 0; } catch (e) { return 0; } }
-function setBest(m, v) { try { localStorage.setItem('plushaut.best.' + m, v); } catch (e) {} }
+const bestKey = m => 'plushaut.best.' + (MODES[m].bestKey || m);
+function best(m) { try { return +localStorage.getItem(bestKey(m)) || 0; } catch (e) { return 0; } }
+function setBest(m, v) { try { localStorage.setItem(bestKey(m), v); } catch (e) {} }
+const unitOf = m => MODES[m].unit || 'm';
+const scoreOf = g => Math.floor(g.score ?? g.alt);
+const fmt = v => v.toLocaleString('fr-FR');
 
 // ---------- son ----------
 let AC = null;
@@ -312,9 +316,9 @@ function pushTrail(g) { g.trail.push({ x: g.ball.x, y: g.ball.y }); if (g.trail.
 function drawHud(g) {
   const col = hudCol(g);
   ctx.fillStyle = col; ctx.textAlign = 'center';
-  ctx.font = `30px ${FD}`; ctx.fillText(`${Math.floor(g.alt)} m`, W / 2, 46);
+  ctx.font = `30px ${FD}`; ctx.fillText(`${fmt(scoreOf(g))} ${unitOf(S.mode)}`, W / 2, 46);
   const b = best(S.mode);
-  if (b) { ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.7; ctx.fillText(`RECORD ${b} m`, W / 2, 62); ctx.globalAlpha = 1; }
+  if (b) { ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.7; ctx.fillText(`RECORD ${fmt(b)} ${unitOf(S.mode)}`, W / 2, 62); ctx.globalAlpha = 1; }
   for (const f of S.floats) {
     ctx.globalAlpha = clamp(f.life * 2, 0, 1); ctx.font = `14px ${FD}`; ctx.fillStyle = col;
     ctx.fillText(f.text, f.x, f.y - g.camY);
@@ -652,10 +656,11 @@ function flipEnds(f) {
 }
 
 const flipper = {
-  title: 'Flipper', n: 1,
-  rule: 'Gardez le doigt appuyé pour lever tous les flippers, relâchez pour les baisser. Frappez la bille pour atteindre l\'étage du dessus.',
+  title: 'Flipper', n: 1, unit: 'pts', bestKey: 'flipper-pts',
+  rule: 'Gardez le doigt appuyé pour lever les flippers. Abattez les 3 cibles violettes pour monter le multiplicateur. Les tremplins jaunes font sauter 3 étages.',
   init() {
-    const g = { camY: 0, M: H / 50, stages: [], bumpers: [], alt: 0, trail: [], hold: false, maxStage: 0, idx: 0 };
+    const g = { camY: 0, M: H / 50, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, score: 0, mult: 1, saver: 5,
+      boost: 0, trail: [], hold: false, maxStage: 0, idx: 0, sinceRamp: 0, sinceSaver: 0, rampEvery: 3 };
     g.grav = H * 1.9; g.vmax = Math.sqrt(2 * g.grav * H * 1.25);
     g.top = H * 0.8; g.startY = g.top + 30;
     g.ball = { x: W * 0.22, y: H * 0.3, vx: W * 0.15, vy: 0, r: 9 };
@@ -675,30 +680,60 @@ const flipper = {
     ];
     const s = 0.57;
     const guides = [[0, y - pl * s, pl, y], [W, y - (W - pr) * s, pr, y]];
-    g.stages.push({ y, i, fl, guides });
+    g.stages.push({ y, i, cx, fl, guides });
+    return i;
   },
   gen(g) {
     while (g.top > g.camY - H * 0.7) {
-      this.makeStage(g, g.top);
-      const a = alt(g, g.top), D = H * (0.5 + Math.min(0.15, a / 3000));
-      // bumpers entre cet étage et le suivant
-      const nb = 1 + (Math.random() < 0.6 ? 1 : 0) + (a > 150 && Math.random() < 0.4 ? 1 : 0), placed = [];
-      for (let k = 0; k < nb; k++) {
-        const r = rnd(13, 18);
-        for (let t = 0; t < 10; t++) {
-          const x = rnd(W * 0.14, W * 0.86), y = g.top - D * rnd(0.35, 0.8);
-          if (placed.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + 34)) { const bp = { x, y, r, lit: 0 }; placed.push(bp); g.bumpers.push(bp); break; }
+      const i = this.makeStage(g, g.top);
+      const a = alt(g, g.top), D = H * (0.5 + Math.min(0.15, a / 3000)), base = g.top;
+      g.sinceRamp++; g.sinceSaver++;
+      // placement sans chevauchement entre cet étage et le suivant
+      const occ = [];
+      const place = (r, y0 = 0.35, y1 = 0.8, x0 = 0.14, x1 = 0.86) => {
+        for (let t = 0; t < 14; t++) {
+          const x = rnd(W * x0, W * x1), y = base - D * rnd(y0, y1);
+          if (occ.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + 30)) { occ.push({ x, y, r }); return { x, y }; }
         }
+        return null;
+      };
+      if (i >= 2 && g.sinceRamp >= g.rampEvery) {
+        const p = place(24, 0.45, 0.75, 0.22, 0.78);
+        if (p) { g.ramps.push({ x: p.x, y: p.y, r: 17, used: false }); g.sinceRamp = 0; g.rampEvery = 4 + Math.floor(Math.random() * 3); }
+      }
+      if (i >= 4 && g.sinceSaver >= 7) {
+        const p = place(16);
+        if (p) { g.pickups.push({ x: p.x, y: p.y, r: 12, taken: false }); g.sinceSaver = 0; }
+      }
+      if (i >= 1 && Math.random() < 0.6) {
+        const p = place(52, 0.4, 0.72, 0.22, 0.78);
+        if (p) {
+          const grp = { left: 3 };
+          for (let k = 0; k < 3; k++) g.targets.push({ x: p.x - 46 + k * 34, y: p.y - 4, w: 24, h: 9, up: true, grp, flash: 0 });
+        }
+      }
+      const nb = 1 + (Math.random() < 0.6 ? 1 : 0) + (a > 150 && Math.random() < 0.4 ? 1 : 0);
+      for (let k = 0; k < nb; k++) {
+        const r = rnd(13, 18), p = place(r);
+        if (p) g.bumpers.push({ x: p.x, y: p.y, r, lit: 0 });
       }
       g.top -= D;
     }
-    g.stages = g.stages.filter(s => s.y < g.camY + H + 80);
-    g.bumpers = g.bumpers.filter(p => p.y < g.camY + H + 40);
+    const lim = g.camY + H + 60;
+    g.stages = g.stages.filter(s => s.y < lim + 20);
+    g.bumpers = g.bumpers.filter(p => p.y < lim);
+    g.targets = g.targets.filter(t => t.y < lim);
+    g.ramps = g.ramps.filter(r => r.y < lim);
+    g.pickups = g.pickups.filter(p => p.y < lim && !p.taken);
+  },
+  launch(g, toY) {
+    const b = g.ball;
+    b.vy = -Math.sqrt(2 * g.grav * Math.max(H * 0.2, b.y - toY)); b.vx *= 0.2;
+    g.boost = 1;
   },
   update(g, dt) {
     const b = g.ball, n = Math.max(1, Math.ceil(dt / (1 / 480))), h = dt / n;
     for (let i = 0; i < n; i++) {
-      // flippers
       for (const s of g.stages) for (const f of s.fl) {
         const tgt = g.hold ? A_UP : A_REST;
         if (f.a > tgt) { f.w = -15; f.a = Math.max(tgt, f.a + f.w * h); if (f.a === tgt) f.w = 0; }
@@ -708,6 +743,8 @@ const flipper = {
       b.vy += g.grav * h; b.x += b.vx * h; b.y += b.vy * h;
       if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * 0.6; }
       if (b.x > W - b.r) { b.x = W - b.r; b.vx = -Math.abs(b.vx) * 0.6; }
+      // en plein saut de tremplin, la bille traverse tout jusqu'au sommet
+      if (g.boost) { if (b.vy >= 0) g.boost = 0; else continue; }
       for (const s of g.stages) {
         if (Math.abs(s.y - b.y) > H * 0.4) continue;
         for (const [x1, y1, x2, y2] of s.guides) {
@@ -737,31 +774,105 @@ const flipper = {
           p.lit = 0.18;
         }
       }
-      const v = Math.hypot(b.vx, b.vy); if (v > g.vmax) { b.vx *= g.vmax / v; b.vy *= g.vmax / v; }
+      for (const t of g.targets) {
+        if (!t.up) continue;
+        const c = hitRect(b, t); if (!c) continue;
+        const vn = b.vx * c.nx + b.vy * c.ny; if (vn < 0) { b.vx -= 1.5 * vn * c.nx; b.vy -= 1.5 * vn * c.ny; }
+        t.up = false; t.flash = 0.3; t.grp.left--;
+        burst(t.x + t.w / 2, t.y, HP[3], 8, H * 0.35);
+        if (t.grp.left === 0) {
+          g.mult = Math.min(5, g.mult + 1);
+          float(t.x + t.w / 2 - 34, t.y - 16, `MULTI ×${g.mult}`);
+          sfx(660, 0.1, 'square', 0.04); setTimeout(() => sfx(990, 0.18, 'square', 0.04), 90);
+          S.shake = Math.max(S.shake, 0.3); S.freeze = 0.05;
+        } else sfx(560 + (3 - t.grp.left) * 120, 0.07, 'square', 0.035);
+      }
+      for (const r of g.ramps) {
+        if (r.used || Math.hypot(b.x - r.x, b.y - r.y) > b.r + r.r) continue;
+        r.used = true;
+        const D = H * (0.5 + Math.min(0.15, g.alt / 3000));
+        this.launch(g, r.y - D * 3 + D * 0.15);
+        float(r.x, r.y - 20, 'TREMPLIN !'); S.shake = 0.4;
+        sfx(220, 0.5, 'sawtooth', 0.04, 5); burst(r.x, r.y, C.sun, 16, H * 0.6);
+        break;
+      }
+      for (const p of g.pickups) {
+        if (p.taken || Math.hypot(b.x - p.x, b.y - p.y) > b.r + p.r) continue;
+        p.taken = true; g.saver = Math.max(g.saver, 10);
+        float(p.x, p.y - 16, 'SAUVEUR 10 s'); sfx(740, 0.2, 'triangle', 0.05, 1.5); burst(p.x, p.y, C.paper, 10, H * 0.4);
+      }
+      if (!g.boost) { const v = Math.hypot(b.vx, b.vy); if (v > g.vmax) { b.vx *= g.vmax / v; b.vy *= g.vmax / v; } }
     }
     for (const p of g.bumpers) p.lit = Math.max(0, p.lit - dt);
+    for (const t of g.targets) t.flash = Math.max(0, t.flash - dt);
+    g.saver = Math.max(0, g.saver - dt);
     for (const s of g.stages) if (s.i > g.maxStage && b.y + b.r < s.y - 10) {
       g.maxStage = s.i; float(W / 2, s.y - 30, `ÉTAGE ${s.i}`); sfx(1040, 0.12, 'triangle', 0.04, 1.5);
     }
+    // tombée sous l'étage atteint : le multiplicateur est perdu
+    const top = g.stages.find(s => s.i === g.maxStage);
+    if (top && g.mult > 1 && b.y - b.r > top.y + 30) { g.mult = 1; float(W / 2, top.y + 40, 'MULTI PERDU'); sfx(200, 0.25, 'square', 0.04, 0.5); }
+
     const tgt = b.y - H * 0.4;
     if (tgt < g.camY) g.camY += (tgt - g.camY) * Math.min(1, dt * 5);
-    g.alt = Math.max(g.alt, alt(g, b.y + b.r));
+    const a = alt(g, b.y + b.r);
+    if (a > g.alt) { g.score += (a - g.alt) * g.mult; g.alt = a; }
     pushTrail(g);
     this.gen(g);
-    if (b.y - b.r > g.camY + H + 5) die();
+    if (b.y - b.r > g.camY + H + 5) {
+      if (g.saver > 0) {
+        const s = top || g.stages.find(s => s.y < g.camY + H);
+        b.x = s ? s.cx : W / 2; b.y = g.camY + H + b.r; b.vx = 0;
+        this.launch(g, (s ? s.y : g.camY + H * 0.6) - H * 0.12);
+        g.saver = 0; float(b.x, g.camY + H * 0.7, 'BILLE SAUVÉE'); sfx(520, 0.3, 'triangle', 0.05, 2);
+      } else die();
+    }
   },
+  deathLine(g) { return `${Math.floor(g.alt)} m, étage ${g.maxStage}. ${landmark(Math.floor(g.alt))}`; },
   draw(g) {
+    const oy = -g.camY, t = performance.now() / 1000;
     ctx.lineCap = 'round';
     for (const p of g.bumpers) {
-      const y = p.y - g.camY; if (y < -30 || y > H + 30) continue;
+      const y = p.y + oy; if (y < -30 || y > H + 30) continue;
       const r = p.r * (1 + p.lit * 1.2);
       ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(p.x, y + 3, r, 0, 7); ctx.fill();
       ctx.fillStyle = p.lit ? C.sun : C.mint; ctx.beginPath(); ctx.arc(p.x, y, r, 0, 7); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.stroke();
       ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(p.x, y, r * 0.42, 0, 7); ctx.fill(); ctx.stroke();
     }
+    for (const k of g.targets) {
+      const y = k.y + oy; if (y < -30 || y > H + 30) continue;
+      if (k.up) {
+        ctx.fillStyle = C.ink; rr(k.x, y + 3, k.w, k.h, 3); ctx.fill();
+        ctx.fillStyle = HP[3]; rr(k.x, y, k.w, k.h, 3); ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.stroke();
+      } else {
+        ctx.globalAlpha = 0.35 + k.flash * 2; ctx.strokeStyle = hudCol(g); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(k.x + 3, y + k.h); ctx.lineTo(k.x + k.w - 3, y + k.h); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+    }
+    for (const r of g.ramps) {
+      const y = r.y + oy; if (y < -40 || y > H + 40) continue;
+      ctx.globalAlpha = r.used ? 0.3 : 1;
+      if (!r.used) { ctx.strokeStyle = C.sun; ctx.lineWidth = 3; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(t * 6); ctx.beginPath(); ctx.arc(r.x, y, r.r + 6 + 2 * Math.sin(t * 6), 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(r.x, y + 3, r.r, 0, 7); ctx.fill();
+      ctx.fillStyle = C.sun; ctx.beginPath(); ctx.arc(r.x, y, r.r, 0, 7); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.lineWidth = 3; ctx.lineJoin = 'round';
+      for (const dy of [3, -4]) { ctx.beginPath(); ctx.moveTo(r.x - 7, y + dy + 4); ctx.lineTo(r.x, y + dy - 3); ctx.lineTo(r.x + 7, y + dy + 4); ctx.stroke(); }
+      ctx.fillStyle = hudCol(g); ctx.font = `800 9px ${FB}`; ctx.textAlign = 'center'; ctx.fillText('+3 ÉTAGES', r.x, y + r.r + 15);
+      ctx.globalAlpha = 1;
+    }
+    for (const p of g.pickups) {
+      const y = p.y + oy + Math.sin(t * 3) * 3; if (y < -30 || y > H + 30) continue;
+      ctx.fillStyle = C.paper; ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, y, p.r, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.sun; ctx.beginPath(); ctx.arc(p.x, y, p.r * 0.45, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.arc(p.x, y, p.r + 6, t * 2, t * 2 + 6.3); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = hudCol(g); ctx.font = `800 9px ${FB}`; ctx.textAlign = 'center'; ctx.fillText('SAUVEUR', p.x, y + p.r + 16);
+    }
     for (const s of g.stages) {
-      const oy = -g.camY; if (s.y + oy < -60 || s.y + oy > H + 60) continue;
+      if (s.y + oy < -60 || s.y + oy > H + 60) continue;
       for (const [x1, y1, x2, y2] of s.guides) {
         ctx.strokeStyle = C.ink; ctx.lineWidth = 6;
         ctx.beginPath(); ctx.moveTo(x1, y1 + oy); ctx.lineTo(x2, y2 + oy); ctx.stroke();
@@ -780,11 +891,22 @@ const flipper = {
       }
     }
     ctx.lineCap = 'butt';
-    drawBall(g, g.ball, false);
+    drawBall(g, g.ball, g.boost > 0);
   },
   hud(g, col) {
-    ctx.textAlign = 'left'; ctx.font = `800 10px ${FB}`; ctx.fillStyle = col; ctx.globalAlpha = 0.8;
-    ctx.fillText('ÉTAGE', 14, 30); ctx.globalAlpha = 1; ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 14, 50);
+    ctx.fillStyle = col; ctx.textAlign = 'left';
+    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('ÉTAGE', 14, 30); ctx.globalAlpha = 1;
+    ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 14, 50);
+    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText(`${Math.floor(g.alt)} m`, 14, 64); ctx.globalAlpha = 1;
+    ctx.textAlign = 'right';
+    ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('MULTI', W - 14, 30); ctx.globalAlpha = 1;
+    ctx.font = `18px ${FD}`; ctx.fillStyle = g.mult > 1 ? HP[3] : col; ctx.fillText(`×${g.mult}`, W - 14, 50);
+    if (g.saver > 0) {
+      const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 110);
+      ctx.globalAlpha = pulse; ctx.fillStyle = C.sun; ctx.fillRect(0, H - 6, W * Math.min(1, g.saver / 10), 6);
+      ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.font = `800 10px ${FB}`;
+      ctx.fillText(`SAUVEUR · ${Math.ceil(g.saver)} s`, W / 2, H - 14);
+    }
   },
   down(g) { g.hold = true; sfx(180, 0.05, 'square', 0.03); },
   move() {},
@@ -800,7 +922,7 @@ function die() {
   S.phase = 'dead'; S.deadAt = performance.now(); S.shake = 0.6;
   burst(g.ball.x, g.ball.y, C.sun, 26, H * 0.9);
   sfx(240, 0.4, 'sawtooth', 0.05, 0.25);
-  const sc = Math.floor(g.alt), b = best(S.mode);
+  const sc = scoreOf(g), b = best(S.mode);
   g.newBest = sc > b && sc > 0;
   g.prevBest = b;
   if (g.newBest) setBest(S.mode, sc);
@@ -812,17 +934,17 @@ function showOverlay() {
   bestEl.classList.remove('new');
   if (S.phase === 'dead') {
     $('#ovEyebrow').textContent = m.title;
-    $('#ovTitle').textContent = `${Math.floor(g.alt)} m`;
-    $('#ovRule').textContent = landmark(Math.floor(g.alt));
+    $('#ovTitle').textContent = `${fmt(scoreOf(g))} ${unitOf(S.mode)}`;
+    $('#ovRule').textContent = m.deathLine ? m.deathLine(g) : landmark(Math.floor(g.alt));
     if (g.newBest) { bestEl.textContent = 'Nouveau record'; bestEl.classList.add('new'); }
-    else bestEl.textContent = `Record : ${g.prevBest} m`;
+    else bestEl.textContent = `Record : ${fmt(g.prevBest)} ${unitOf(S.mode)}`;
     $('#ovCta').textContent = 'Touchez pour rejouer';
   } else {
     $('#ovEyebrow').textContent = `Prototype ${m.n} sur 4`;
     $('#ovTitle').textContent = m.title;
     $('#ovRule').textContent = m.rule;
     const b = best(S.mode);
-    bestEl.textContent = b ? `Record : ${b} m` : '';
+    bestEl.textContent = b ? `Record : ${fmt(b)} ${unitOf(S.mode)}` : '';
     bestEl.hidden = !b;
     $('#ovCta').textContent = 'Touchez pour jouer';
   }
