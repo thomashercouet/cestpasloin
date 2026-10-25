@@ -7,6 +7,8 @@ Prototype jouable : onglet **Flipper** (version épurée) et **Flipper+** (versi
 Direction retenue (inspirée de Flappy Bird) : un seul geste, un score en mètres (1 étage = 3 m, écart constant à l'écran),
 la bille meurt quand elle sort par le bas de l'écran, relance instantanée, ligne « TON RECORD » dans le décor.
 Les éléments arrivent un par un en montant ; la difficulté est indexée sur le numéro d'étage.
+Types d'étages (tirés au sort, introduits progressivement) : classique, décalé, asymétrique (dès l'étage 3),
+plot au-dessus du trou (4), mobile (6), court (9). Bumpers dès l'étage 1, tremplins dès l'étage 8.
 
 Plan : 1. cœur sec (fait) · 2. paliers visuels par altitude (ville, nuages, espace) et repères dessinés ·
 3. oiseau et bulle introduits progressivement.

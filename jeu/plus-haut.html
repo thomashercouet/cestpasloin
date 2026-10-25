@@ -746,6 +746,7 @@ const flipper = {
     g.boost = 1;
   },
   update(g, dt) {
+    if (this.moveStages) this.moveStages(g, dt);
     const b = g.ball, n = Math.max(1, Math.ceil(dt / (1 / 480))), h = dt / n;
     for (let i = 0; i < n; i++) {
       for (const s of g.stages) for (const f of s.fl) {
@@ -958,12 +959,12 @@ const flipperPur = Object.assign(Object.create(flipper), {
         return null;
       };
       // les premiers étages n'ont que des flippers ; les éléments arrivent un par un en montant
-      if (i >= 6 && g.sinceRamp >= g.rampEvery) {
+      if (i >= 8 && g.sinceRamp >= g.rampEvery) {
         const p = place(24, 0.45, 0.75, 0.22, 0.78);
-        if (p) { g.ramps.push({ x: p.x, y: p.y, r: 17, used: false }); g.sinceRamp = 0; g.rampEvery = 6 + Math.floor(Math.random() * 4); }
+        if (p) { g.ramps.push({ x: p.x, y: p.y, r: 17, used: false }); g.sinceRamp = 0; g.rampEvery = 7 + Math.floor(Math.random() * 5); }
       }
-      if (i >= 2) {
-        const nb = (Math.random() < 0.7 ? 1 : 0) + (i >= 8 && Math.random() < 0.5 ? 1 : 0);
+      if (i >= 1) {
+        const nb = (Math.random() < 0.75 ? 1 : 0) + (i >= 5 && Math.random() < 0.55 ? 1 : 0);
         for (let k = 0; k < nb; k++) { const r = rnd(13, 18), p = place(r); if (p) g.bumpers.push({ x: p.x, y: p.y, r, lit: 0 }); }
       }
       g.top -= D;
@@ -972,6 +973,54 @@ const flipperPur = Object.assign(Object.create(flipper), {
     g.stages = g.stages.filter(s => s.y < lim + 20);
     g.bumpers = g.bumpers.filter(p => p.y < lim);
     g.ramps = g.ramps.filter(r => r.y < lim);
+  },
+  // Étages variés : le type est tiré au sort, jamais deux fois le même type spécial d'affilée
+  makeStage(g, y) {
+    const i = g.idx++;
+    let type = 'classic';
+    if (i >= 1) {
+      const pool = [['classic', 3], ['offset', 3]];
+      if (i >= 3) pool.push(['asym', 3]);
+      if (i >= 4) pool.push(['post', 2]);
+      if (i >= 6) pool.push(['moving', 3]);
+      if (i >= 9) pool.push(['short', 2]);
+      const tot = pool.reduce((a, p) => a + p[1], 0);
+      for (let t = 0; t < 6; t++) {
+        let x = Math.random() * tot; type = pool.find(p => (x -= p[1]) <= 0)[0];
+        if (type !== g.lastType || type === 'classic' || type === 'offset') break;
+      }
+    }
+    g.lastType = type;
+    const k = Math.min(1, i / 40);
+    const L = W * (0.24 - 0.07 * k);
+    let gap = W * (0.13 + 0.06 * k), L1 = L, L2 = L;
+    let off = i ? rnd(-1, 1) * W * (0.04 + 0.08 * k) : 0;
+    if (type === 'offset') off = (Math.random() < 0.5 ? -1 : 1) * W * rnd(0.1, 0.16);
+    if (type === 'asym') { const big = Math.random() < 0.5; L1 = L * (big ? 1.3 : 0.65); L2 = L * (big ? 0.65 : 1.3); }
+    if (type === 'short') { L1 = L2 = L * 0.72; gap *= 0.85; }
+    const dl = gap / 2 + L1 * Math.cos(A_REST), dr = gap / 2 + L2 * Math.cos(A_REST);
+    const st = { y, i, type, dl, dr, amp: 0, ph: 0, sp: 0,
+      fl: [{ px: 0, py: y, L: L1, side: 1, a: A_REST, w: 0, r: 6 }, { px: 0, py: y, L: L2, side: -1, a: A_REST, w: 0, r: 6 }], guides: [[], []] };
+    const lo = W * 0.07 + dl, hi = W * 0.93 - dr;
+    let cx = clamp(W / 2 + off, lo, hi);
+    if (type === 'moving') {
+      st.amp = Math.min(W * rnd(0.08, 0.15), (hi - lo) / 2); cx = (lo + hi) / 2;
+      st.ph = rnd(0, 6.28); st.sp = rnd(0.9, 1.5);
+    }
+    st.base = cx;
+    this.layoutStage(st, cx);
+    if (type === 'post') g.bumpers.push({ x: cx, y: y - H * 0.07, r: 8, lit: 0 });
+    g.stages.push(st);
+    return i;
+  },
+  layoutStage(st, cx) {
+    const s = 0.57, pl = cx - st.dl, pr = cx + st.dr;
+    st.cx = cx; st.fl[0].px = pl; st.fl[1].px = pr;
+    st.guides[0] = [0, st.y - pl * s, pl, st.y]; st.guides[1] = [W, st.y - (W - pr) * s, pr, st.y];
+  },
+  moveStages(g, dt) {
+    g.t = (g.t || 0) + dt;
+    for (const st of g.stages) if (st.type === 'moving') this.layoutStage(st, st.base + st.amp * Math.sin(g.t * st.sp + st.ph));
   },
   deathLine(g) { return `Étage ${g.maxStage}. ${landmark(Math.floor(g.alt))} ${pick(FUNNY)}`; },
   hud(g, col) {
