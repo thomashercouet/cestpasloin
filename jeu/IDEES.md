@@ -10,7 +10,9 @@ Les éléments arrivent un par un en montant ; la difficulté est indexée sur l
 Types d'étages (tirés au sort, introduits progressivement) : classique, décalé, asymétrique (dès l'étage 3),
 plot au-dessus du trou (4), mobile (6), court (9). Bumpers dès l'étage 1, tremplins dès l'étage 8.
 
-Plan : 1. cœur sec (fait) · 2. paliers visuels (fait) · 3. oiseau et bulle introduits progressivement.
+Plan : 1. cœur sec (fait) · 2. paliers visuels (fait) · 3. oiseaux (dès 45 m, dévient la bille) et bulles
+(dès 75 m, +1 étage) (fait). Prochaines idées : nuage d'orage qui pousse la bille, satellites dans l'espace,
+défi quotidien, réglage du ressenti au doigt.
 
 Paliers : la rue (0 m), les toits de Paris (15), le grand ciel (45), les nuages (90), le coucher de soleil (150),
 la haute atmosphère (250), l'espace (400). Bannière à chaque palier, jauge à gauche, repères dessinés en silhouette

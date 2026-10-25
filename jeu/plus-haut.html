@@ -1049,7 +1049,7 @@ const flipperPur = Object.assign(Object.create(flipper), {
   title: 'Flipper', n: 1, unit: 'm', bestKey: 'flipper-etages', pure: true,
   rule: 'Gardez le doigt appuyé pour lever les flippers. Montez d\'étage en étage (1 étage = 3 m). Si la bille sort par le bas de l\'écran, c\'est fini.',
   init() {
-    const g = { camY: 0, M: H * 0.5 / 3, D: H * 0.5, tick: 15, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, mult: 1, saver: 0,
+    const g = { camY: 0, M: H * 0.5 / 3, D: H * 0.5, tick: 15, stages: [], bumpers: [], birds: [], bubbles: [], seen: {}, targets: [], ramps: [], pickups: [], alt: 0, mult: 1, saver: 0,
       boost: 0, trail: [], hold: false, maxStage: 0, idx: 0, sinceRamp: 0, sinceSaver: 0, rampEvery: 6 };
     g.grav = H * 1.9; g.vmax = Math.sqrt(2 * g.grav * H * 1.25);
     g.top = H * 0.8; g.startY = g.top;
@@ -1079,12 +1079,23 @@ const flipperPur = Object.assign(Object.create(flipper), {
         const nb = (Math.random() < 0.75 ? 1 : 0) + (i >= 5 && Math.random() < 0.55 ? 1 : 0);
         for (let k = 0; k < nb; k++) { const r = rnd(13, 18), p = place(r); if (p) g.bumpers.push({ x: p.x, y: p.y, r, lit: 0 }); }
       }
+      // oiseaux dès le grand ciel (45 m), bulles dès 75 m
+      if (i >= 15 && Math.random() < Math.min(0.6, 0.3 + i * 0.006)) {
+        const dir = Math.random() < 0.5 ? 1 : -1;
+        g.birds.push({ x: rnd(0, W), y: base - D * rnd(0.3, 0.85), vx: dir * W * rnd(0.22, 0.4), r: 11, hit: 0, ph: rnd(0, 6) });
+      }
+      if (i >= 25 && Math.random() < 0.2) {
+        const p = place(20, 0.4, 0.75, 0.2, 0.8);
+        if (p) g.bubbles.push({ x: p.x, y: p.y, r: 16, ph: rnd(0, 6) });
+      }
       g.top -= D;
     }
     const lim = g.camY + H + 60;
     g.stages = g.stages.filter(s => s.y < lim + 20);
     g.bumpers = g.bumpers.filter(p => p.y < lim);
     g.ramps = g.ramps.filter(r => r.y < lim);
+    g.birds = g.birds.filter(o => o.y < lim && o.y > g.camY - H * 2);
+    g.bubbles = g.bubbles.filter(o => o.y < lim && !o.popped);
   },
   // Étages variés : le type est tiré au sort, jamais deux fois le même type spécial d'affilée
   makeStage(g, y) {
@@ -1137,7 +1148,40 @@ const flipperPur = Object.assign(Object.create(flipper), {
   deathLine(g) { return `Étage ${g.maxStage}. ${landmark(Math.floor(g.alt))} ${pick(FUNNY)}`; },
   decor: true, skyStops: PURE_SKY, nightRange: [200, 150],
   update(g, dt) {
+    const b = g.ball, px = b.x, py = b.y;
     flipper.update.call(this, g, dt);
+    if (S.phase !== 'play') return;
+    const t = performance.now() / 1000;
+    for (const o of g.birds) {
+      o.x += o.vx * dt; o.hit = Math.max(0, o.hit - dt);
+      if (o.hit) o.y -= H * 0.5 * dt;
+      if (o.x < -30) o.x = W + 30; if (o.x > W + 30) o.x = -30;
+      const sy = o.y - g.camY;
+      if (!g.seen.bird && sy > 40 && sy < H - 40) { g.seen.bird = true; float(W / 2, o.y - 30, 'ATTENTION : OISEAUX'); }
+      if (o.hit || g.boost) continue;
+      // test sur la position actuelle et à mi-chemin, pour ne pas traverser l'oiseau
+      for (const [qx, qy] of [[b.x, b.y], [(b.x + px) / 2, (b.y + py) / 2]]) {
+        const dx = qx - o.x, dy = qy - o.y, d = Math.hypot(dx, dy);
+        if (d < b.r + o.r && d > 1e-6) {
+          const nx = dx / d, ny = dy / d, vn = b.vx * nx + b.vy * ny;
+          b.x = o.x + nx * (b.r + o.r + 1); b.y = o.y + ny * (b.r + o.r + 1);
+          if (vn < 0) { b.vx -= 1.8 * vn * nx; b.vy -= 1.8 * vn * ny; }
+          b.vx += o.vx * 0.4; o.hit = 0.6;
+          burst(o.x, o.y, C.paper, 10, H * 0.4); sfx(1500, 0.07, 'square', 0.04, 0.5); S.shake = Math.max(S.shake, 0.2);
+          break;
+        }
+      }
+    }
+    for (const o of g.bubbles) {
+      const oy = o.y + Math.sin(t * 2 + o.ph) * 5, sy = oy - g.camY;
+      if (!g.seen.bubble && sy > 40 && sy < H - 40) { g.seen.bubble = true; float(o.x, o.y - 34, 'BULLE : +1 ÉTAGE'); }
+      if (o.popped || g.boost || Math.hypot(b.x - o.x, b.y - oy) > b.r + o.r) continue;
+      o.popped = true;
+      const next = g.stages.find(s => s.i === g.maxStage + 1);
+      b.x = o.x; b.vx *= 0.2;
+      this.launch(g, next ? next.y - H * 0.12 : b.y - H * 0.6);
+      burst(o.x, oy, C.paper, 14, H * 0.5); sfx(700, 0.12, 'sine', 0.06, 2.2); float(o.x, oy - 20, '+1 ÉTAGE');
+    }
     const k = tierIndex(g.alt);
     if (k > (g.tier || 0)) {
       g.tier = k; g.banner = { text: TIERS[k][1], k, t: performance.now() };
@@ -1150,6 +1194,28 @@ const flipperPur = Object.assign(Object.create(flipper), {
     ctx.font = `800 10px ${FB}`; ctx.globalAlpha = 0.8; ctx.fillText('ÉTAGE', 18, 30); ctx.globalAlpha = 1;
     ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 18, 50);
     drawTierHud(g, col);
+  },
+  draw(g) {
+    flipper.draw.call(this, g);
+    const t = performance.now() / 1000;
+    for (const o of g.bubbles) {
+      const y = o.y + Math.sin(t * 2 + o.ph) * 5 - g.camY; if (y < -30 || y > H + 30) continue;
+      ctx.globalAlpha = 0.35; ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(o.x, y, o.r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = C.paper; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(o.x - o.r * 0.35, y - o.r * 0.35, o.r * 0.25, 0, 7); ctx.fillStyle = C.paper; ctx.fill();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(o.x, y, o.r + 1.5, 0, 7); ctx.stroke();
+    }
+    for (const o of g.birds) {
+      const y = o.y - g.camY; if (y < -30 || y > H + 30) continue;
+      const flap = Math.sin(t * 14 + o.ph) * 6, d = Math.sign(o.vx);
+      ctx.save(); ctx.translate(o.x, y); if (o.hit) ctx.rotate(t * 20);
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.ellipse(0, 0, 9, 5.5, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(d * 8, -3, 4, 0, 7); ctx.fill();
+      ctx.fillStyle = C.sun; ctx.beginPath(); ctx.moveTo(d * 11, -4); ctx.lineTo(d * 16, -2); ctx.lineTo(d * 11, -1); ctx.fill();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-2, -2); ctx.lineTo(-d * 6, -8 - flap); ctx.moveTo(2, -2); ctx.lineTo(d * 2, -9 - flap); ctx.stroke();
+      ctx.restore();
+    }
   }
 });
 const pick = a => a[Math.floor(Math.random() * a.length)];
