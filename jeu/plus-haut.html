@@ -151,7 +151,7 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp = (a, b, t) => a + (b - a) * t;
 
 // Repères d'altitude réels, en mètres
-const MARKS = [[56, 'Tour de Pise'], [93, 'Statue de la Liberté'], [139, 'Pyramide de Khéops'], [210, 'Tour Montparnasse'],
+const MARKS = [[6, 'Maison à un étage'], [20, 'Immeuble haussmannien'], [35, 'Grand chêne'], [50, 'Arc de Triomphe'], [56, 'Tour de Pise'], [69, 'Tours de Notre-Dame'], [93, 'Statue de la Liberté'], [139, 'Pyramide de Khéops'], [210, 'Tour Montparnasse'],
   [330, 'Tour Eiffel'], [443, 'Empire State Building'], [828, 'Burj Khalifa'], [1000, '1 km'], [4806, 'Mont Blanc'], [8849, 'Everest']];
 
 // ---------- état partagé ----------
@@ -252,8 +252,8 @@ function drawSky(g) {
   // graduations tous les 50 m
   const col = hudCol(g);
   ctx.strokeStyle = col; ctx.fillStyle = col; ctx.font = `600 10px ${FB}`; ctx.textAlign = 'right';
-  const m0 = Math.floor(alt(g, g.camY + H) / 50) * 50;
-  for (let m = m0; m < m0 + H / g.M + 100; m += 50) {
+  const T = g.tick || 50, m0 = Math.floor(alt(g, g.camY + H) / T) * T;
+  for (let m = m0; m < m0 + H / g.M + 2 * T; m += T) {
     const y = g.startY - m * g.M - g.camY; if (y < -10 || y > H + 10 || m === 0) continue;
     ctx.globalAlpha = 0.4; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(W - 10, y); ctx.lineTo(W, y); ctx.stroke();
@@ -682,7 +682,7 @@ const flipper = {
     return g;
   },
   makeStage(g, y) {
-    const a = alt(g, y), i = g.idx++;
+    const i = g.idx++, a = g.D ? i * 25 : alt(g, y); // difficulté indexée sur l'étage en mode épuré
     const L = W * clamp(0.25 - a / 9000, 0.17, 0.25);
     const gap = W * 0.11 + Math.min(W * 0.05, a / 40);
     const cx = W / 2 + (i ? rnd(-1, 1) * W * Math.min(0.12, a / 2500) : 0);
@@ -804,7 +804,7 @@ const flipper = {
       for (const r of g.ramps) {
         if (r.used || Math.hypot(b.x - r.x, b.y - r.y) > b.r + r.r) continue;
         r.used = true;
-        const D = H * (0.5 + Math.min(0.15, g.alt / 3000));
+        const D = g.D || H * (0.5 + Math.min(0.15, g.alt / 3000));
         this.launch(g, r.y - D * 3 + D * 0.15);
         float(r.x, r.y - 20, 'TREMPLIN !'); S.shake = 0.4;
         sfx(220, 0.5, 'sawtooth', 0.04, 5); burst(r.x, r.y, C.sun, 16, H * 0.6);
@@ -831,8 +831,6 @@ const flipper = {
     if (tgt < g.camY) g.camY += (tgt - g.camY) * Math.min(1, dt * 5);
     const a = alt(g, b.y + b.r);
     if (a > g.alt) { if (g.score !== undefined) g.score += (a - g.alt) * g.mult; g.alt = a; }
-    // version épurée : rater l'étage atteint, c'est perdu
-    if (this.pure && top && !g.boost && b.y - b.r > top.y + 30) { die(); return; }
     pushTrail(g);
     this.gen(g);
     if (b.y - b.r > g.camY + H + 5) {
@@ -935,10 +933,10 @@ const flipper = {
 // =====================================================================
 const FUNNY = ['La gravité gagne toujours.', 'La bille a le vertige.', 'Newton vous salue.', 'Si près du ciel…', 'Le sol vous remercie de votre visite.'];
 const flipperPur = Object.assign(Object.create(flipper), {
-  title: 'Flipper', n: 1, unit: 'm', bestKey: 'flipper-pur', pure: true,
-  rule: 'Gardez le doigt appuyé pour lever les flippers. Montez d\'étage en étage. Ratez un étage et c\'est fini.',
+  title: 'Flipper', n: 1, unit: 'm', bestKey: 'flipper-etages', pure: true,
+  rule: 'Gardez le doigt appuyé pour lever les flippers. Montez d\'étage en étage (1 étage = 3 m). Si la bille sort par le bas de l\'écran, c\'est fini.',
   init() {
-    const g = { camY: 0, M: H / 50, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, mult: 1, saver: 0,
+    const g = { camY: 0, M: H * 0.5 / 3, D: H * 0.5, tick: 15, stages: [], bumpers: [], targets: [], ramps: [], pickups: [], alt: 0, mult: 1, saver: 0,
       boost: 0, trail: [], hold: false, maxStage: 0, idx: 0, sinceRamp: 0, sinceSaver: 0, rampEvery: 6 };
     g.grav = H * 1.9; g.vmax = Math.sqrt(2 * g.grav * H * 1.25);
     g.top = H * 0.8; g.startY = g.top;
@@ -949,7 +947,7 @@ const flipperPur = Object.assign(Object.create(flipper), {
   gen(g) {
     while (g.top > g.camY - H * 0.7) {
       const i = this.makeStage(g, g.top);
-      const a = alt(g, g.top), D = H * (0.5 + Math.min(0.15, a / 3000)), base = g.top;
+      const D = g.D, base = g.top; // 1 étage = 3 m, toujours le même écart à l'écran
       g.sinceRamp++;
       const occ = [];
       const place = (r, y0 = 0.35, y1 = 0.8, x0 = 0.14, x1 = 0.86) => {

@@ -4,8 +4,9 @@
 
 Prototype jouable : onglet **Flipper** (version épurée) et **Flipper+** (version chargée) de `jeu/plus-haut.html`.
 
-Direction retenue (inspirée de Flappy Bird) : un seul geste, un score en mètres, on perd au premier étage raté,
-relance instantanée, ligne « TON RECORD » dans le décor. Les éléments arrivent un par un en montant.
+Direction retenue (inspirée de Flappy Bird) : un seul geste, un score en mètres (1 étage = 3 m, écart constant à l'écran),
+la bille meurt quand elle sort par le bas de l'écran, relance instantanée, ligne « TON RECORD » dans le décor.
+Les éléments arrivent un par un en montant ; la difficulté est indexée sur le numéro d'étage.
 
 Plan : 1. cœur sec (fait) · 2. paliers visuels par altitude (ville, nuages, espace) et repères dessinés ·
 3. oiseau et bulle introduits progressivement.
