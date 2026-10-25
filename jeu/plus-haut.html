@@ -47,7 +47,7 @@ body {
 .modes { display: flex; gap: 4px; flex: 1; justify-content: center; min-width: 0; }
 .modes button, .mute {
   font: 600 14px var(--f-body);
-  padding: 7px 12px;
+  padding: 7px 9px;
   border-radius: 999px;
   border: 2px solid transparent;
   background: transparent;
@@ -102,7 +102,8 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   <header class="bar">
     <div class="brand">PLUS HAUT</div>
     <nav class="modes" role="tablist" aria-label="Prototypes">
-      <button id="tab-fronde" role="tab" data-mode="fronde" aria-selected="true">Fronde</button>
+      <button id="tab-flipper" role="tab" data-mode="flipper" aria-selected="true">Flipper</button>
+      <button id="tab-fronde" role="tab" data-mode="fronde" aria-selected="false">Fronde</button>
       <button id="tab-rebond" role="tab" data-mode="rebond" aria-selected="false">Rebond</button>
       <button id="tab-zigzag" role="tab" data-mode="zigzag" aria-selected="false">Zigzag</button>
     </nav>
@@ -112,7 +113,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     <canvas id="c" aria-label="Zone de jeu"></canvas>
     <div class="overlay" id="ov">
       <div class="card">
-        <span class="eyebrow" id="ovEyebrow">Prototype 1 sur 3</span>
+        <span class="eyebrow" id="ovEyebrow">Prototype 1 sur 4</span>
         <h2 id="ovTitle">Fronde</h2>
         <p id="ovRule"></p>
         <span class="best" id="ovBest"></span>
@@ -333,7 +334,7 @@ function drawParts(g) {
 // 1. FRONDE : tir à la fronde, chaque brique cassée recharge un tir
 // =====================================================================
 const fronde = {
-  title: 'Fronde', n: 1,
+  title: 'Fronde', n: 2,
   rule: 'Glissez vers le bas puis relâchez pour lancer la bille. Le temps ralentit pendant la visée. Chaque brique cassée recharge un tir.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, bricks: [], charges: 1, maxCharges: 2, aim: null, ts: 1, alt: 0, trail: [], noCharge: 0 };
@@ -482,7 +483,7 @@ const fronde = {
 // 2. REBOND : la bille rebondit seule, le doigt la déplace à l'horizontale
 // =====================================================================
 const rebond = {
-  title: 'Rebond', n: 2,
+  title: 'Rebond', n: 3,
   rule: 'La bille rebondit toute seule. Faites glisser le doigt à gauche ou à droite pour la guider. Chaque brique s\'use à chaque rebond.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, bricks: [], alt: 0, trail: [], drag: null };
@@ -567,7 +568,7 @@ const rebond = {
 // 3. ZIGZAG : la bille monte seule, chaque tap inverse sa direction
 // =====================================================================
 const zigzag = {
-  title: 'Zigzag', n: 3,
+  title: 'Zigzag', n: 4,
   rule: 'La bille monte toute seule et rebondit sur les murs. Touchez l\'écran pour inverser sa direction et passer dans les trous.',
   init() {
     const g = { camY: 0, startY: H - 60, M: H / 50, rows: [], alt: 0, trail: [], dir: 1, t: 0 };
@@ -628,7 +629,169 @@ const zigzag = {
   move() {}, up() {}
 };
 
-const MODES = { fronde, rebond, zigzag };
+// =====================================================================
+// 4. FLIPPER : des étages de flippers empilés, un seul bouton les lève tous
+// =====================================================================
+const A_REST = 0.52, A_UP = -0.42;
+// Point le plus proche sur un segment, et côté « dessus » (traversable par en dessous)
+function segContact(b, x1, y1, x2, y2, rad, oneWay) {
+  const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
+  const t = clamp(((b.x - x1) * dx + (b.y - y1) * dy) / l2, 0, 1);
+  const cx = x1 + dx * t, cy = y1 + dy * t;
+  const ex = b.x - cx, ey = b.y - cy, d = Math.hypot(ex, ey);
+  if (d >= b.r + rad || d < 1e-6) return null;
+  if (oneWay) {
+    let ux = dy, uy = -dx; if (uy > 0) { ux = -ux; uy = -uy; }
+    if ((b.x - x1) * ux + (b.y - y1) * uy <= 0) return null;
+  }
+  return { nx: ex / d, ny: ey / d, pen: b.r + rad - d, cx, cy };
+}
+function flipEnds(f) {
+  const th = f.side > 0 ? f.a : Math.PI - f.a;
+  return { x2: f.px + Math.cos(th) * f.L, y2: f.py + Math.sin(th) * f.L, om: f.side > 0 ? f.w : -f.w };
+}
+
+const flipper = {
+  title: 'Flipper', n: 1,
+  rule: 'Gardez le doigt appuyé pour lever tous les flippers, relâchez pour les baisser. Frappez la bille pour atteindre l\'étage du dessus.',
+  init() {
+    const g = { camY: 0, M: H / 50, stages: [], bumpers: [], alt: 0, trail: [], hold: false, maxStage: 0, idx: 0 };
+    g.grav = H * 1.9; g.vmax = Math.sqrt(2 * g.grav * H * 1.25);
+    g.top = H * 0.8; g.startY = g.top + 30;
+    g.ball = { x: W * 0.22, y: H * 0.3, vx: W * 0.15, vy: 0, r: 9 };
+    this.gen(g);
+    return g;
+  },
+  makeStage(g, y) {
+    const a = alt(g, y), i = g.idx++;
+    const L = W * clamp(0.25 - a / 9000, 0.17, 0.25);
+    const gap = W * 0.11 + Math.min(W * 0.05, a / 40);
+    const cx = W / 2 + (i ? rnd(-1, 1) * W * Math.min(0.12, a / 2500) : 0);
+    const tip = L * Math.cos(A_REST);
+    const pl = cx - gap / 2 - tip, pr = cx + gap / 2 + tip;
+    const fl = [
+      { px: pl, py: y, L, side: 1, a: A_REST, w: 0, r: 6 },
+      { px: pr, py: y, L, side: -1, a: A_REST, w: 0, r: 6 }
+    ];
+    const s = 0.57;
+    const guides = [[0, y - pl * s, pl, y], [W, y - (W - pr) * s, pr, y]];
+    g.stages.push({ y, i, fl, guides });
+  },
+  gen(g) {
+    while (g.top > g.camY - H * 0.7) {
+      this.makeStage(g, g.top);
+      const a = alt(g, g.top), D = H * (0.5 + Math.min(0.15, a / 3000));
+      // bumpers entre cet étage et le suivant
+      const nb = 1 + (Math.random() < 0.6 ? 1 : 0) + (a > 150 && Math.random() < 0.4 ? 1 : 0), placed = [];
+      for (let k = 0; k < nb; k++) {
+        const r = rnd(13, 18);
+        for (let t = 0; t < 10; t++) {
+          const x = rnd(W * 0.14, W * 0.86), y = g.top - D * rnd(0.35, 0.8);
+          if (placed.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + 34)) { const bp = { x, y, r, lit: 0 }; placed.push(bp); g.bumpers.push(bp); break; }
+        }
+      }
+      g.top -= D;
+    }
+    g.stages = g.stages.filter(s => s.y < g.camY + H + 80);
+    g.bumpers = g.bumpers.filter(p => p.y < g.camY + H + 40);
+  },
+  update(g, dt) {
+    const b = g.ball, n = Math.max(1, Math.ceil(dt / (1 / 480))), h = dt / n;
+    for (let i = 0; i < n; i++) {
+      // flippers
+      for (const s of g.stages) for (const f of s.fl) {
+        const tgt = g.hold ? A_UP : A_REST;
+        if (f.a > tgt) { f.w = -15; f.a = Math.max(tgt, f.a + f.w * h); if (f.a === tgt) f.w = 0; }
+        else if (f.a < tgt) { f.w = 11; f.a = Math.min(tgt, f.a + f.w * h); if (f.a === tgt) f.w = 0; }
+        else f.w = 0;
+      }
+      b.vy += g.grav * h; b.x += b.vx * h; b.y += b.vy * h;
+      if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * 0.6; }
+      if (b.x > W - b.r) { b.x = W - b.r; b.vx = -Math.abs(b.vx) * 0.6; }
+      for (const s of g.stages) {
+        if (Math.abs(s.y - b.y) > H * 0.4) continue;
+        for (const [x1, y1, x2, y2] of s.guides) {
+          const c = segContact(b, x1, y1, x2, y2, 3, true); if (!c) continue;
+          b.x += c.nx * c.pen; b.y += c.ny * c.pen;
+          const vn = b.vx * c.nx + b.vy * c.ny; if (vn < 0) { b.vx -= 1.3 * vn * c.nx; b.vy -= 1.3 * vn * c.ny; }
+        }
+        for (const f of s.fl) {
+          const { x2, y2, om } = flipEnds(f);
+          const c = segContact(b, f.px, f.py, x2, y2, f.r, true); if (!c) continue;
+          b.x += c.nx * c.pen; b.y += c.ny * c.pen;
+          const ux = -(c.cy - f.py) * om, uy = (c.cx - f.px) * om; // vitesse du point de contact
+          const vn = (b.vx - ux) * c.nx + (b.vy - uy) * c.ny;
+          if (vn < 0) {
+            b.vx -= 1.3 * vn * c.nx; b.vy -= 1.3 * vn * c.ny;
+            if (-vn > H * 1.2 && om) { sfx(330, 0.08, 'triangle', 0.05, 1.8); S.shake = Math.max(S.shake, 0.15); }
+          }
+        }
+      }
+      for (const p of g.bumpers) {
+        const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy);
+        if (d < b.r + p.r && d > 1e-6) {
+          const nx = dx / d, ny = dy / d; b.x = p.x + nx * (b.r + p.r); b.y = p.y + ny * (b.r + p.r);
+          const sp = Math.max(Math.hypot(b.vx, b.vy) * 0.9, H * 1.15);
+          b.vx = nx * sp; b.vy = ny * sp;
+          if (p.lit < 0.1) { sfx(880, 0.08, 'square', 0.04, 0.6); burst(p.x + nx * p.r, p.y + ny * p.r, C.sun, 6, H * 0.35); }
+          p.lit = 0.18;
+        }
+      }
+      const v = Math.hypot(b.vx, b.vy); if (v > g.vmax) { b.vx *= g.vmax / v; b.vy *= g.vmax / v; }
+    }
+    for (const p of g.bumpers) p.lit = Math.max(0, p.lit - dt);
+    for (const s of g.stages) if (s.i > g.maxStage && b.y + b.r < s.y - 10) {
+      g.maxStage = s.i; float(W / 2, s.y - 30, `ÉTAGE ${s.i}`); sfx(1040, 0.12, 'triangle', 0.04, 1.5);
+    }
+    const tgt = b.y - H * 0.4;
+    if (tgt < g.camY) g.camY += (tgt - g.camY) * Math.min(1, dt * 5);
+    g.alt = Math.max(g.alt, alt(g, b.y + b.r));
+    pushTrail(g);
+    this.gen(g);
+    if (b.y - b.r > g.camY + H + 5) die();
+  },
+  draw(g) {
+    ctx.lineCap = 'round';
+    for (const p of g.bumpers) {
+      const y = p.y - g.camY; if (y < -30 || y > H + 30) continue;
+      const r = p.r * (1 + p.lit * 1.2);
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(p.x, y + 3, r, 0, 7); ctx.fill();
+      ctx.fillStyle = p.lit ? C.sun : C.mint; ctx.beginPath(); ctx.arc(p.x, y, r, 0, 7); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(p.x, y, r * 0.42, 0, 7); ctx.fill(); ctx.stroke();
+    }
+    for (const s of g.stages) {
+      const oy = -g.camY; if (s.y + oy < -60 || s.y + oy > H + 60) continue;
+      for (const [x1, y1, x2, y2] of s.guides) {
+        ctx.strokeStyle = C.ink; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(x1, y1 + oy); ctx.lineTo(x2, y2 + oy); ctx.stroke();
+      }
+      for (const f of s.fl) {
+        const { x2, y2 } = flipEnds(f);
+        ctx.strokeStyle = C.ink; ctx.lineWidth = f.r * 2 + 4;
+        ctx.beginPath(); ctx.moveTo(f.px, f.py + oy + 2); ctx.lineTo(x2, y2 + oy + 2); ctx.stroke();
+        ctx.strokeStyle = C.coral; ctx.lineWidth = f.r * 2;
+        ctx.beginPath(); ctx.moveTo(f.px, f.py + oy); ctx.lineTo(x2, y2 + oy); ctx.stroke();
+        ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(f.px, f.py + oy, 3, 0, 7); ctx.fill();
+      }
+      if (s.i) {
+        ctx.fillStyle = hudCol(g); ctx.globalAlpha = 0.6; ctx.font = `800 10px ${FB}`; ctx.textAlign = 'left';
+        ctx.fillText(`ÉTAGE ${s.i}`, 12, s.guides[0][1] + oy - 10); ctx.globalAlpha = 1;
+      }
+    }
+    ctx.lineCap = 'butt';
+    drawBall(g, g.ball, false);
+  },
+  hud(g, col) {
+    ctx.textAlign = 'left'; ctx.font = `800 10px ${FB}`; ctx.fillStyle = col; ctx.globalAlpha = 0.8;
+    ctx.fillText('ÉTAGE', 14, 30); ctx.globalAlpha = 1; ctx.font = `18px ${FD}`; ctx.fillText(g.maxStage, 14, 50);
+  },
+  down(g) { g.hold = true; sfx(180, 0.05, 'square', 0.03); },
+  move() {},
+  up(g) { g.hold = false; }
+};
+
+const MODES = { flipper, fronde, rebond, zigzag };
 
 // ---------- cycle de partie ----------
 function die() {
@@ -655,7 +818,7 @@ function showOverlay() {
     else bestEl.textContent = `Record : ${g.prevBest} m`;
     $('#ovCta').textContent = 'Touchez pour rejouer';
   } else {
-    $('#ovEyebrow').textContent = `Prototype ${m.n} sur 3`;
+    $('#ovEyebrow').textContent = `Prototype ${m.n} sur 4`;
     $('#ovTitle').textContent = m.title;
     $('#ovRule').textContent = m.rule;
     const b = best(S.mode);
@@ -716,9 +879,13 @@ window.addEventListener('keydown', e => {
     e.preventDefault(); ensureAudio();
     if (S.phase !== 'play') { if (S.phase === 'menu' || performance.now() - S.deadAt > 700) startRun(); }
     else if (S.mode === 'zigzag') zigzag.down(S.g);
+    else if (S.mode === 'flipper') flipper.down(S.g);
   }
 });
-window.addEventListener('keyup', e => { S.keys[e.key] = false; });
+window.addEventListener('keyup', e => {
+  S.keys[e.key] = false;
+  if (e.key === ' ' && S.mode === 'flipper' && S.g) S.g.hold = false;
+});
 document.querySelectorAll('.modes button').forEach(b => b.addEventListener('click', () => { setMode(b.dataset.mode); saveMode(); b.blur(); }));
 const muteBtn = $('#mute');
 muteBtn.addEventListener('click', () => {
@@ -751,7 +918,7 @@ function start(data) {
   let m = data && data.mode;
   try { if (!m) m = localStorage.getItem('plushaut.mode'); S.muted = !!localStorage.getItem('plushaut.muted'); } catch (e) {}
   muteBtn.setAttribute('aria-pressed', S.muted);
-  setMode(MODES[m] ? m : 'fronde');
+  setMode(MODES[m] ? m : 'flipper');
   new ResizeObserver(() => { resize(); if (S.phase !== 'play') { S.g = MODES[S.mode].init(); } }).observe(stage);
   window.claude?.hot?.snapshot?.(() => ({ mode: S.mode }));
   requestAnimationFrame(frame);
